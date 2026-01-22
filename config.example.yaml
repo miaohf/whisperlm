@@ -1,0 +1,36 @@
+# WhisperLM 配置文件
+# 复制此文件为 config.yaml 并根据需要修改
+
+# 服务配置
+server:
+  host: "0.0.0.0"
+  port: 8003
+  workers: 1
+
+# WhisperX 配置
+whisperx:
+  model: "large-v3"           # tiny, base, small, medium, large-v2, large-v3
+  device: "cuda"              # cuda, cpu
+  compute_type: "int8"       # int16 平衡，int8 最快，float16 精度最高
+  batch_size: 24              # 24GB显卡推荐 24-32，长音频用 16-24
+  language: null              # 自动检测，或指定如 "en", "zh"
+  # 对齐模型配置（可选）：如果默认对齐模型加载失败，可以手动指定替代模型
+  # 如果留空或不配置，对齐失败时会自动跳过词级时间戳，但转录仍会继续
+  # align_models:
+  #   zh: "MKK/wav2vec2-large-xlsr-53-chinese-zh-cn-gpt"  # 中文对齐模型（替代选项1）
+  #   # zh: "ydshieh/wav2vec2-large-xlsr-53-chinese-zh-cn-gpt"  # 中文对齐模型（替代选项2）
+  #   en: "WAV2VEC2_ASR_BASE_960H"  # 英文对齐模型（torchaudio）
+
+# 说话人分离配置
+diarization:
+  enabled: true
+  huggingface_token: "${HF_TOKEN}"  # 需要申请 pyannote 权限
+  min_speakers: null          # 最小说话人数，null 为自动
+  max_speakers: null          # 最大说话人数，null 为自动
+
+# 输出配置
+output:
+  formats: ["json", "srt", "vtt"]
+  include_word_timestamps: true
+  include_confidence: true
+
