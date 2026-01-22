@@ -1,0 +1,29 @@
+[Unit]
+Description=WhisperLM - 智能语音转文字服务
+Documentation=https://github.com/miaohf/whisperlm
+After=network.target
+
+[Service]
+Type=simple
+User=unicom
+Group=unicom
+WorkingDirectory=/home/unicom/mycode/WhisperLM
+Environment="PATH=/home/unicom/mycode/WhisperLM/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/snap/bin/uv run python -m whisperlm.main
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=whisperlm
+
+# 资源限制（可选，根据实际情况调整）
+# LimitNOFILE=65536
+# LimitNPROC=4096
+
+# GPU 访问（如果需要）
+# SupplementaryGroups=render video
+
+[Install]
+WantedBy=multi-user.target
+
