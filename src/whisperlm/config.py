@@ -12,7 +12,7 @@ from pydantic_settings import BaseSettings
 class ServerConfig(BaseModel):
     """服务配置"""
     host: str = "0.0.0.0"
-    port: int = 8003
+    port: int = 8001
     workers: int = 1
 
 
@@ -20,12 +20,11 @@ class WhisperXConfig(BaseModel):
     """WhisperX 配置"""
     model: str = "large-v3"
     device: str = "cuda"
-    compute_type: str = "int8"  # float16, int16, int8, int8_float16
-    batch_size: int = 24  # 24GB显卡推荐 24-32，太高会 OOM
+    compute_type: str = "float16"  # float16, int16, int8, int8_float16
+    batch_size: int = 16
     language: str | None = None
     # 对齐模型配置：{language_code: model_name}
     # 例如 {"zh": "jonatasgrosman/wav2vec2-large-xlsr-53-chinese-zh-cn"}
-    # 如果某个语言的对齐模型加载失败，可以在这里指定替代模型
     align_models: dict[str, str] | None = None
 
 
@@ -39,16 +38,41 @@ class DiarizationConfig(BaseModel):
     )
     min_speakers: int | None = None
     max_speakers: int | None = None
-    
+
     def __init__(self, **data):
         # 如果配置文件中没有提供 token 或值为空字符串，尝试从环境变量读取
         huggingface_token = data.get("huggingface_token")
         if not huggingface_token or huggingface_token.strip() == "":
-            # 尝试从环境变量读取
             env_token = os.getenv("HF_TOKEN")
             if env_token:
                 data["huggingface_token"] = env_token
         super().__init__(**data)
+
+
+class LLMFeaturesConfig(BaseModel):
+    """LLM 功能开关"""
+    semantic_segmentation: bool = True    # 按语义边界智能断句/合并
+    error_correction: bool = True         # 修复 ASR 识别错误
+    expression_optimization: bool = True  # 优化口语表达
+
+
+class LLMConfig(BaseModel):
+    """LLM 配置"""
+    enabled: bool = False
+    provider: str = "vllm"               # vllm, openai, ollama, azure, anthropic
+    model: str = "Qwen/Qwen3-32B"
+    base_url: str = "http://localhost:8000/v1"
+    api_key: str = ""
+    timeout: int = 120
+    max_retries: int = 3
+    features: LLMFeaturesConfig = Field(default_factory=LLMFeaturesConfig)
+
+
+class TranslationConfig(BaseModel):
+    """翻译配置"""
+    enabled: bool = False
+    target_language: str = "zh"
+    style: str = "natural"               # natural, formal, casual
 
 
 class OutputConfig(BaseModel):
@@ -63,12 +87,14 @@ class Settings(BaseSettings):
     server: ServerConfig = Field(default_factory=ServerConfig)
     whisperx: WhisperXConfig = Field(default_factory=WhisperXConfig)
     diarization: DiarizationConfig = Field(default_factory=DiarizationConfig)
+    llm: LLMConfig = Field(default_factory=LLMConfig)
+    translation: TranslationConfig = Field(default_factory=TranslationConfig)
     output: OutputConfig = Field(default_factory=OutputConfig)
 
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
-        extra = "ignore"  # 忽略 .env 文件中不匹配的环境变量（如 HF_TOKEN）
+        extra = "ignore"
         case_sensitive = False
 
 

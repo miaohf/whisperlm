@@ -28,6 +28,8 @@ class TranscribeResponse(BaseModel):
     task_id: str
     status: str = "completed"
     language: str | None = None
+    source_language: str | None = None   # 翻译场景下明确标注原始语言
+    target_language: str | None = None   # 翻译场景下标注目标语言
     duration: float = 0.0
     speakers: list[str] = Field(default_factory=list)
     segments: list[SegmentResponse] = Field(default_factory=list)
@@ -68,11 +70,20 @@ class DiarizationStatus(BaseModel):
     loaded: bool
 
 
+class LLMStatus(BaseModel):
+    """LLM 服务状态"""
+    provider: str
+    model: str
+    enabled: bool
+    connected: bool | None = None  # None 表示尚未检测
+
+
 class HealthResponse(BaseModel):
     """健康检查响应"""
     status: str = "healthy"
     version: str
     whisperx: WhisperXStatus
     diarization: DiarizationStatus
+    llm: LLMStatus
     gpu: GPUInfo
 
