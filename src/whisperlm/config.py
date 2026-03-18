@@ -32,9 +32,23 @@ class WhisperXConfig(BaseModel):
 class DiarizationConfig(BaseModel):
     """说话人分离配置"""
     enabled: bool = True
-    huggingface_token: str | None = Field(default_factory=lambda: os.getenv("HF_TOKEN"))
+    # 优先级：config.yaml > .env 文件 > 环境变量 HF_TOKEN
+    huggingface_token: str | None = Field(
+        default=None,
+        description="Hugging Face Token，用于访问 pyannote 模型。可从环境变量 HF_TOKEN 或 .env 文件读取"
+    )
     min_speakers: int | None = None
     max_speakers: int | None = None
+    
+    def __init__(self, **data):
+        # 如果配置文件中没有提供 token 或值为空字符串，尝试从环境变量读取
+        huggingface_token = data.get("huggingface_token")
+        if not huggingface_token or huggingface_token.strip() == "":
+            # 尝试从环境变量读取
+            env_token = os.getenv("HF_TOKEN")
+            if env_token:
+                data["huggingface_token"] = env_token
+        super().__init__(**data)
 
 
 class OutputConfig(BaseModel):
@@ -54,6 +68,8 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        extra = "ignore"  # 忽略 .env 文件中不匹配的环境变量（如 HF_TOKEN）
+        case_sensitive = False
 
 
 def _expand_env_vars(config: dict[str, Any]) -> dict[str, Any]:

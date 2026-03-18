@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Annotated
 
 import aiofiles
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile, Depends
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile, Depends, Request
 from fastapi.responses import StreamingResponse
 from loguru import logger
 
@@ -16,6 +16,16 @@ from ..services.separation_service import SeparationService
 from .models import TranscribeResponse, HealthResponse, WhisperXStatus, DiarizationStatus, GPUInfo
 
 router = APIRouter(prefix="/api/v1", tags=["transcribe"])
+
+
+def _format_size(size: int) -> str:
+    """格式化文件大小"""
+    if size < 1024:
+        return f"{size}B"
+    elif size < 1024 * 1024:
+        return f"{size/1024:.1f}KB"
+    else:
+        return f"{size/1024/1024:.1f}MB"
 
 _separation_service: SeparationService | None = None
 
@@ -46,6 +56,7 @@ SUPPORTED_FORMATS = {".mp3", ".wav", ".flac", ".ogg", ".m4a", ".mp4", ".mkv", ".
 
 @router.post("/transcribe", response_model=TranscribeResponse)
 async def transcribe(
+    request: Request,
     file: Annotated[UploadFile, File(description="音频/视频文件")],
     language: Annotated[str | None, Form(description="语言代码")] = None,
     diarization: Annotated[bool, Form(description="是否启用说话人分离")] = True,
@@ -58,9 +69,14 @@ async def transcribe(
     
     request_start = time.time()
     
-    # 立即打印请求简要信息（在读取文件之前）
-    logger.info(f"[API] Received transcription request: file={file.filename}, "
-               f"language={language}, diarization={diarization}, "
+    # 打印原始请求信息
+    client_ip = request.client.host if request.client else "unknown"
+    logger.info(f"[API] ======== Request Start ========")
+    logger.info(f"[API] Client: {client_ip}")
+    logger.info(f"[API] Endpoint: {request.method} {request.url.path}")
+    logger.info(f"[API] Content-Type: {request.headers.get('content-type', 'N/A')}")
+    logger.info(f"[API] File: name={file.filename}, content_type={file.content_type}")
+    logger.info(f"[API] Parameters: language={language}, diarization={diarization}, "
                f"speakers={min_speakers}-{max_speakers}")
     
     if not file.filename:
@@ -79,7 +95,9 @@ async def transcribe(
         file_size = len(content)
         tmp.write(content)
         audio_path = Path(tmp.name)
-        logger.debug(f"[API] File saved to temporary path: {audio_path}, size: {file_size} bytes")
+    
+    logger.info(f"[API] File size: {_format_size(file_size)} ({file_size} bytes)")
+    logger.info(f"[API] ======== Request End ========")
 
     try:
         response = await task_service.transcribe(
@@ -134,6 +152,7 @@ async def generate_multipart_response(vocals_path: Path, background_path: Path):
 
 @router.post("/separate")
 async def separate_audio(
+    request: Request,
     file: Annotated[UploadFile, File(description="音频文件")],
     model: Annotated[str, Form(description="分离模型")] = "htdemucs",
     separation_service: SeparationService = Depends(get_separation_service),
@@ -149,8 +168,14 @@ async def separate_audio(
     
     request_start = time.time()
     
-    # 立即打印请求简要信息（在读取文件之前）
-    logger.info(f"[API] Received audio separation request: file={file.filename}, model={model}")
+    # 打印原始请求信息
+    client_ip = request.client.host if request.client else "unknown"
+    logger.info(f"[API] ======== Request Start ========")
+    logger.info(f"[API] Client: {client_ip}")
+    logger.info(f"[API] Endpoint: {request.method} {request.url.path}")
+    logger.info(f"[API] Content-Type: {request.headers.get('content-type', 'N/A')}")
+    logger.info(f"[API] File: name={file.filename}, content_type={file.content_type}")
+    logger.info(f"[API] Model: {model}")
     
     if not file.filename:
         raise HTTPException(status_code=400, detail="文件名不能为空")
@@ -165,7 +190,9 @@ async def separate_audio(
         file_size = len(content)
         tmp.write(content)
         audio_path = Path(tmp.name)
-        logger.debug(f"[API] File saved: {audio_path}, size: {file_size} bytes")
+    
+    logger.info(f"[API] File size: {_format_size(file_size)} ({file_size} bytes)")
+    logger.info(f"[API] ======== Request End ========")
 
     output_dir = Path(tempfile.mkdtemp())
     try:

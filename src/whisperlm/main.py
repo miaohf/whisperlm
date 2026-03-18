@@ -2,6 +2,16 @@
 
 import os
 import sys
+
+# 在任何其他导入之前，强制设置无缓冲模式
+os.environ["PYTHONUNBUFFERED"] = "1"
+
+# 强制 stdout/stderr 为无缓冲模式
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(line_buffering=True, write_through=True)
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(line_buffering=True, write_through=True)
+
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -14,12 +24,6 @@ from .api.legacy_routes import legacy_router
 from .api.models import HealthResponse
 from .config import get_settings, load_config
 from .utils.logger import logger, setup_logger
-
-# 设置 Python 无缓冲模式（确保日志实时输出）
-os.environ.setdefault("PYTHONUNBUFFERED", "1")
-# 设置 stdout 为行缓冲模式
-if hasattr(sys.stdout, 'reconfigure'):
-    sys.stdout.reconfigure(line_buffering=True)
 
 # 初始化日志配置
 setup_logger(level="INFO", enable_file=False)

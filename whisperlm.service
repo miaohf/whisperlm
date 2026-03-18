@@ -10,7 +10,10 @@ Group=unicom
 WorkingDirectory=/home/unicom/mycode/WhisperLM
 Environment="PATH=/home/unicom/mycode/WhisperLM/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 Environment="PYTHONUNBUFFERED=1"
-ExecStart=/snap/bin/uv run python -m whisperlm.main
+# 从 .env 文件加载环境变量（systemd 会自动忽略注释行和空行）
+# 注意：如果 .env 文件不存在，使用 - 前缀来忽略错误
+EnvironmentFile=-/home/unicom/mycode/WhisperLM/.env
+ExecStart=/snap/bin/uv run python -m src.whisperlm.main
 Restart=always
 RestartSec=10
 StandardOutput=journal

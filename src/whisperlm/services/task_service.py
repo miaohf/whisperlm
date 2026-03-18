@@ -20,10 +20,46 @@ class TaskService:
         self.settings = settings or get_settings()
         self.whisperx = whisperx_service or WhisperXService(self.settings)
 
+    def _normalize_speaker_labels(self, segments: list[dict[str, Any]]) -> dict[str, str]:
+        """
+        标准化说话人标签，确保按出现顺序从 SPEAKER_00 开始
+        
+        Args:
+            segments: 原始段落列表
+            
+        Returns:
+            说话人标签映射字典 {原始标签: 标准化标签}
+        """
+        # 按时间顺序遍历，记录每个说话人第一次出现的顺序
+        speaker_order: dict[str, int] = {}
+        order_counter = 0
+        
+        for seg in sorted(segments, key=lambda x: x.get("start", 0.0)):
+            speaker = seg.get("speaker")
+            if speaker and speaker not in speaker_order:
+                speaker_order[speaker] = order_counter
+                order_counter += 1
+        
+        # 创建映射：原始标签 -> SPEAKER_XX
+        speaker_mapping = {
+            original: f"SPEAKER_{order:02d}"
+            for original, order in speaker_order.items()
+        }
+        
+        if speaker_mapping:
+            logger.debug(f"Speaker label normalization: {speaker_mapping}")
+        
+        return speaker_mapping
+
     def _convert_segments(self, result: dict[str, Any]) -> list[SegmentResponse]:
         """转换 WhisperX 结果为标准格式"""
+        raw_segments = result.get("segments", [])
+        
+        # 标准化说话人标签（按出现顺序从 SPEAKER_00 开始）
+        speaker_mapping = self._normalize_speaker_labels(raw_segments)
+        
         segments = []
-        for i, seg in enumerate(result.get("segments", [])):
+        for i, seg in enumerate(raw_segments):
             words = []
             for w in seg.get("words", []):
                 words.append(WordTimestamp(
@@ -34,12 +70,17 @@ class TaskService:
                 ))
             
             confidence = sum(w.confidence for w in words) / len(words) if words else 0.0
+            
+            # 应用说话人标签映射
+            original_speaker = seg.get("speaker")
+            normalized_speaker = speaker_mapping.get(original_speaker) if original_speaker else None
+            
             segments.append(SegmentResponse(
                 id=i,
                 start=seg.get("start", 0.0),
                 end=seg.get("end", 0.0),
                 text=seg.get("text", "").strip(),
-                speaker=seg.get("speaker"),
+                speaker=normalized_speaker,
                 words=words,
                 confidence=confidence,
             ))
@@ -87,29 +128,30 @@ class TaskService:
             logger.info(f"[Task {task_id}] WhisperX transcription completed: {whisperx_time:.2f}s, "
                        f"language={detected_language}, segments={raw_segments_count}")
             
-            # 转换格式
+            # 转换格式（包含说话人标签标准化）
             convert_start = time.time()
             segments = self._convert_segments(result)
             convert_time = time.time() - convert_start
-            logger.info(f"[Task {task_id}] Format conversion completed: {convert_time:.2f}s, "
-                       f"segments={len(segments)}")
             
-            # 统计信息
+            # 统计信息（使用标准化后的说话人标签）
             speakers = list(set(seg.speaker for seg in segments if seg.speaker))
+            speakers_sorted = sorted(speakers) if speakers else []
             total_duration = self._get_duration(result, audio_path)
             total_time = time.time() - start_time
             
+            logger.info(f"[Task {task_id}] Format conversion completed: {convert_time:.2f}s, "
+                       f"segments={len(segments)}")
             logger.info(f"[Task {task_id}] Transcription completed: total_time={total_time:.2f}s, "
                        f"audio_duration={total_duration:.1f}s, "
-                       f"segments={len(segments)}, speakers={len(speakers)}, "
-                       f"speaker_list={speakers}")
+                       f"segments={len(segments)}, speakers={len(speakers_sorted)}, "
+                       f"speaker_list={speakers_sorted}")
             
             return TranscribeResponse(
                 task_id=task_id,
                 status="completed",
                 language=detected_language,
                 duration=total_duration,
-                speakers=sorted(speakers),
+                speakers=speakers_sorted,  # 已经是排序后的标准化标签
                 segments=segments,
             )
         except Exception as e:

@@ -41,26 +41,113 @@ class WhisperXService:
         )
         logger.info("Whisper model loaded")
 
+    def _check_diarization_cache(self) -> bool:
+        """检查 pyannote 说话人分离模型是否已缓存到本地"""
+        import os
+        
+        # pyannote 模型可能的缓存路径（按优先级）
+        cache_dirs = [
+            os.path.expanduser("~/.cache/torch/pyannote"),  # pyannote 默认缓存位置
+            os.path.expanduser("~/.cache/huggingface/hub"),  # huggingface 通用缓存
+        ]
+        
+        # 需要检查的模型（pyannote/speaker-diarization-3.1 依赖的模型）
+        required_models = [
+            "models--pyannote--segmentation-3.0",
+            "models--pyannote--speaker-diarization-3.1",
+            "models--pyannote--wespeaker-voxceleb-resnet34-LM",
+        ]
+        
+        # 在所有缓存目录中查找
+        for cache_dir in cache_dirs:
+            if not os.path.exists(cache_dir):
+                continue
+                
+            all_found = True
+            for model in required_models:
+                model_path = os.path.join(cache_dir, model)
+                snapshots_path = os.path.join(model_path, "snapshots")
+                
+                if not os.path.exists(snapshots_path):
+                    all_found = False
+                    break
+                
+                # 检查是否有快照版本目录
+                try:
+                    versions = os.listdir(snapshots_path)
+                    if not versions:
+                        all_found = False
+                        break
+                except OSError:
+                    all_found = False
+                    break
+            
+            if all_found:
+                logger.info(f"Diarization model cache found locally at: {cache_dir}")
+                return True
+        
+        logger.debug("Diarization model cache not found in any known location")
+        return False
+
     def load_diarization_model(self) -> None:
-        """加载说话人分离模型"""
+        """加载说话人分离模型（优先使用本地缓存）"""
         if not self.settings.diarization.enabled:
             return
         if self._diarize_model is not None:
             return
 
         from whisperx.diarize import DiarizationPipeline
+        import os
 
+        # 优先检查本地缓存
+        cache_exists = self._check_diarization_cache()
         hf_token = self.settings.diarization.huggingface_token
+        
+        if cache_exists:
+            # 本地缓存存在，尝试离线加载（设置环境变量禁用网络检查）
+            logger.info("Loading diarization model from local cache (offline mode)...")
+            try:
+                # 设置离线模式
+                old_offline = os.environ.get("HF_HUB_OFFLINE")
+                os.environ["HF_HUB_OFFLINE"] = "1"
+                
+                try:
+                    # 使用 token（如果有）或 None 尝试加载
+                    # 离线模式下 token 主要用于本地缓存目录查找
+                    self._diarize_model = DiarizationPipeline(
+                        use_auth_token=hf_token if hf_token else True,  # True 表示使用缓存的 token
+                        device=self._device,
+                    )
+                    logger.info("Diarization model loaded from local cache")
+                    return
+                finally:
+                    # 恢复环境变量
+                    if old_offline is None:
+                        os.environ.pop("HF_HUB_OFFLINE", None)
+                    else:
+                        os.environ["HF_HUB_OFFLINE"] = old_offline
+                        
+            except Exception as e:
+                logger.warning(f"Failed to load diarization model from cache: {e}")
+                logger.info("Falling back to online mode...")
+        
+        # 本地缓存不存在或加载失败，需要 HF_TOKEN 从网络下载
         if not hf_token:
-            logger.warning("HF_TOKEN not configured, diarization will be unavailable")
+            logger.warning("Diarization model not cached and HF_TOKEN not configured")
+            logger.warning("Please set HF_TOKEN to download the model, or manually cache it first")
+            logger.info("Hint: Run once with HF_TOKEN set, then the model will be cached locally")
             return
 
-        logger.info("Loading diarization model...")
-        self._diarize_model = DiarizationPipeline(
-            use_auth_token=hf_token,
-            device=self._device,
-        )
-        logger.info("Diarization model loaded")
+        logger.info("Loading diarization model from network...")
+        try:
+            self._diarize_model = DiarizationPipeline(
+                use_auth_token=hf_token,
+                device=self._device,
+            )
+            logger.info("Diarization model loaded and cached for future use")
+        except Exception as e:
+            logger.error(f"Failed to load diarization model: {e}")
+            logger.warning("Diarization will be unavailable")
 
     def load_audio(self, audio_path: str | Path) -> Any:
         """加载音频文件（单次加载，供多个步骤复用）"""

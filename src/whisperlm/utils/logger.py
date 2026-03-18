@@ -31,12 +31,16 @@ def _get_relative_path(file_path: str) -> str:
         if project_root:
             current = Path(file_path).resolve()
             try:
-                return str(current.relative_to(project_root))
+                path = str(current.relative_to(project_root))
             except ValueError:
-                return Path(file_path).name
-        return Path(file_path).name
+                path = Path(file_path).name
+        else:
+            path = Path(file_path).name
     except Exception:
-        return Path(file_path).name
+        path = Path(file_path).name
+    
+    # 转义路径中的尖括号，避免被 loguru 误认为颜色标签
+    return path.replace("<", r"\<").replace(">", r"\>")
 
 
 def _format_record(record: dict) -> str:
@@ -91,6 +95,24 @@ def _format_record_file(record: dict) -> str:
     return fmt + "\n"
 
 
+class UnbufferedStderr:
+    """无缓冲的 stderr 包装器，直接写入文件描述符"""
+    def __init__(self):
+        import os
+        self._fd = sys.stderr.fileno()
+    
+    def write(self, message: str) -> int:
+        import os
+        if isinstance(message, str):
+            data = message.encode('utf-8', errors='replace')
+        else:
+            data = bytes(message)
+        return os.write(self._fd, data)
+    
+    def flush(self):
+        pass  # os.write 是无缓冲的，不需要 flush
+
+
 def setup_logger(level: str = "INFO", enable_file: bool = False, log_file: str | None = None):
     """
     配置 loguru 日志
@@ -103,21 +125,20 @@ def setup_logger(level: str = "INFO", enable_file: bool = False, log_file: str |
     # 先移除默认处理器
     logger.remove()
     
-    # 设置 stdout 为无缓冲模式（确保实时输出）
-    if hasattr(sys.stdout, 'reconfigure'):
-        sys.stdout.reconfigure(line_buffering=True)
+    # 创建无缓冲的输出流
+    unbuffered_stderr = UnbufferedStderr()
     
-    # 控制台输出（带颜色，使用自定义格式函数）
-    # 使用 sys.stderr 而不是 sys.stdout，因为 stderr 默认无缓冲
-    # enqueue=False: 禁用异步队列，确保日志实时输出
+    # 控制台输出 - 使用异步队列 + 无缓冲输出
+    # enqueue=True: 启用异步队列，日志在后台线程中输出
+    # 这样即使主线程被 GPU 操作阻塞，日志仍然可以实时输出
     logger.add(
-        sys.stderr,  # 使用 stderr 而不是 stdout，stderr 默认无缓冲
+        unbuffered_stderr,  # 直接写入 fd，绕过所有缓冲
         format=_format_record,
         level=level,
-        colorize=True,
+        colorize=False,  # 自定义 sink 不支持自动颜色处理
         backtrace=True,
         diagnose=True,
-        enqueue=False,  # 禁用异步队列，实时输出日志
+        enqueue=True,  # 启用异步队列，让日志在后台线程输出（不被 GPU 阻塞）
     )
     
     # 文件输出（无颜色）
@@ -139,7 +160,7 @@ def setup_logger(level: str = "INFO", enable_file: bool = False, log_file: str |
             compression="zip",
             backtrace=True,
             diagnose=True,
-            enqueue=False,  # 禁用异步队列，实时输出日志
+            enqueue=True,  # 启用异步队列，让日志在后台线程输出
         )
     
     return logger
